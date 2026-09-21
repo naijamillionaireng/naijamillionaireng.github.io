@@ -383,6 +383,12 @@ footer.foot a{color:var(--mute);text-decoration:underline}
 html[data-motion="reduce"] *{animation:none!important;transition:none!important}
 @media(prefers-reduced-motion:reduce){*{animation:none!important}}
 
+/* ---------- legal text ---------- */
+.legal{font-size:.9rem;color:var(--mute);line-height:1.55;margin-bottom:12px}
+.legal h3{font-size:.95rem;color:var(--ink);margin:14px 0 4px}
+.legal ol,.legal ul{padding-left:20px;display:grid;gap:8px}
+.legal b{color:var(--ink)}
+
 /* ---------- responsive ---------- */
 @media(max-width:980px){
   .hero{grid-template-columns:1fr}
@@ -498,7 +504,7 @@ html[data-motion="reduce"] *{animation:none!important;transition:none!important}
             </div>
           </div>
         </div>
-        <footer class="foot"><span>New questions every week. Play responsibly — it's only naira on paper. Weekly cash prizes are free to enter.</span><span><a href="#" id="reportLink">Report a question</a></span></footer>
+        <footer class="foot"><span>New questions every week. Play responsibly — it's only naira on paper. Weekly cash prizes are free to enter.</span><span><a href="#terms" data-legal="terms">Contest rules</a> · <a href="#privacy" data-legal="privacy">Privacy</a> · <a href="#" id="reportLink">Report or suggest a question</a></span></footer>
       </section>
 
       <!-- ============ WEEKLY ============ -->
@@ -526,6 +532,7 @@ html[data-motion="reduce"] *{animation:none!important;transition:none!important}
                 <li><b>Server-checked.</b> Answers and timing are checked on the server — scores can't be edited in your browser.</li>
                 <li><b>Claim within <span class="claimDays">14</span> days.</b> The winner is verified, then paid by airtime or bank transfer. Suspicious runs are reviewed and can be disqualified.</li>
                 <li>One person, one entry. Sharing answers or using bots or multiple devices gets you removed.</li>
+                <li>Read the full <a href="#terms" data-legal="terms" style="text-decoration:underline">contest rules</a> and <a href="#privacy" data-legal="privacy" style="text-decoration:underline">privacy notice</a>.</li>
               </ol>
             </div>
           </div>
@@ -627,6 +634,7 @@ html[data-motion="reduce"] *{animation:none!important;transition:none!important}
       <button class="btn wa" id="waBtn">Share on WhatsApp</button>
       <button class="btn ghost" id="copyBtn">Copy result</button>
       <button class="btn ghost" id="homeBtn">Home</button>
+      <button class="btn ghost small hidden" id="flagQBtn">⚑ Report last question</button>
     </div>
   </div>
 </section>
@@ -642,9 +650,10 @@ const CONFIG={
   API:'https://naija-millionaire-api.betterdays-goalhub.workers.dev',                                   // e.g. 'https://naija-millionaire-api.<you>.workers.dev'  (blank = weekly challenge shows "opening soon")
   SITE_URL:'https://naijamillionaireng.github.io/',                              // e.g. 'https://naijamillionaireng.github.io/'  (used in share text)
   PRIZE_FALLBACK:3000,                      // shown until the server answers
+  TURNSTILE_SITEKEY:'0x4AAAAAAE_JMdjHh7YqwF_G',                     // Cloudflare Turnstile site key (public) — bot check before a ranked run
+  CONTACT_EMAIL:'naijamillionaireng@gmail.com',
   FORMS:{                                   // Google Form endpoints (formResponse URL + entry ids) — filled in after the forms are created
-    report:{url:'',fields:{}},
-    suggest:{url:'',fields:{}}
+    report:{url:'https://docs.google.com/forms/d/e/1FAIpQLSeeCRpQ2y0qPz6Bkyh5g-5X2XK9OdJWpjGy4qXcs4Ra8EQ4kA/formResponse',fields:{type:'entry.143641220',text:'entry.373020603',page:'entry.262976528'}}        // Google Form 'formResponse' URL + entry ids
   }
 };
 
@@ -1090,17 +1099,44 @@ async function startWeekly(){
   if(!apiBase()){toast('The weekly challenge opens soon!');return goView('weekly')}
   if(!validName(profile.name)){return askName(()=>startWeekly())}
   cancelSpeech();
+  const nm=profile.name.trim();
+  const attempt=cfToken=>api('POST','/run/start',{name:nm,deviceId:deviceId(),cfToken});
   let r;
-  try{r=await api('POST','/run/start',{name:profile.name.trim(),deviceId:deviceId()})}
+  try{r=await attempt()}
   catch(e){
     if(e.status===409&&e.data&&e.data.error==='already_played'){
       if(e.data.resumable&&e.data.runId)return resumeRun(e.data.runId);
       toast('You already used this week’s ranked run.');return goView('weekly');
     }
-    return weeklyError(e,()=>startWeekly());
+    if(e.message==='bot_check_failed'){            // the server wants a human check first
+      let tk;
+      try{tk=await humanCheck()}catch(x){if(x.message==='cancelled')return;return weeklyError(x,()=>startWeekly())}
+      try{r=await attempt(tk)}catch(e2){
+        if(e2.status===409&&e2.data&&e2.data.error==='already_played'){toast('You already used this week’s ranked run.');return goView('weekly')}
+        return weeklyError(e2,()=>startWeekly());
+      }
+    }else return weeklyError(e,()=>startWeekly());
   }
   const runs=store.get('nm_runs',{});runs[r.week.id]={runId:r.runId,name:profile.name.trim(),status:'active',at:Date.now()};store.set('nm_runs',runs);
   beginRemote(r.runId,r.seq,r.question,r.week.id,r.life);
+}
+/* Cloudflare Turnstile human check (only shown when the server asks for it) */
+let tsLoading=null;
+function loadTurnstile(){
+  if(window.turnstile)return Promise.resolve();
+  if(tsLoading)return tsLoading;
+  tsLoading=new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';s.async=true;s.onload=res;s.onerror=()=>{tsLoading=null;rej(new Error('turnstile_load'))};document.head.appendChild(s)});
+  return tsLoading;
+}
+async function humanCheck(){
+  if(!CONFIG.TURNSTILE_SITEKEY)throw new Error('turnstile_error');
+  await loadTurnstile();
+  return new Promise((resolve,reject)=>{
+    openModal('<h2>Quick security check</h2><p>Just making sure you’re a real person — this only takes a second.</p><div id="tsBox" style="display:flex;justify-content:center;min-height:70px"></div><div class="actions2" style="justify-content:center"><button class="btn ghost small" id="mNo">Cancel</button></div>','center');
+    let id;const done=(fn,v)=>{try{window.turnstile.remove(id)}catch(e){}closeModalRaw();fn(v)};
+    $('mNo').onclick=()=>done(reject,new Error('cancelled'));
+    id=window.turnstile.render('#tsBox',{sitekey:CONFIG.TURNSTILE_SITEKEY,callback:t=>done(resolve,t),'error-callback':()=>done(reject,new Error('turnstile_error')),'timeout-callback':()=>done(reject,new Error('turnstile_timeout'))});
+  });
 }
 async function resumeRun(runId){
   let r;
@@ -1121,7 +1157,7 @@ function beginRemote(runId,seq,question,weekId,life,removed,extra){
 }
 const remoteQ=q=>({tier:q.tier,cat:q.cat,q:q.q,opts:q.opts.map(t=>({t})),limitMs:q.limitMs,id:q.id});
 function weeklyError(e,retry){
-  const map={no_api:'The weekly challenge is not live yet.',timeout:'The connection timed out.',too_many_from_network:'Too many runs from this network this week. Try from another connection.',bad_name:'Please use a name of 2–12 letters or numbers.',week_closed:'This week has ended. A new week starts Monday.'};
+  const map={no_api:'The weekly challenge is not live yet.',timeout:'The connection timed out.',too_many_from_network:'Too many runs from this network this week. Try from another connection.',bad_name:'Please use a name of 2–12 letters or numbers.',week_closed:'This week has ended. A new week starts Monday.',bot_check_failed:'The security check did not pass. Please try again.',turnstile_error:'The security check could not load. Check your connection or turn off any ad/content blocker, then try again.',turnstile_load:'The security check could not load. Check your connection or turn off any ad/content blocker, then try again.',turnstile_timeout:'The security check timed out. Please try again.'};
   const msg=map[e.message]||(e.status===0?'Could not reach the server. Check your internet and try again.':'Something went wrong ('+(e.message||e.status)+').');
   openModal('<h2>Weekly challenge</h2><p>'+esc(msg)+'</p><div class="actions2"><button class="btn ghost small" id="mNo">Close</button>'+(retry?'<button class="btn small" id="mYes">Try again</button>':'')+'</div>');
   $('mNo').onclick=closeModalRaw;if(retry)$('mYes').onclick=()=>{closeModalRaw();retry()};
@@ -1282,6 +1318,7 @@ async function lockIn(){
 async function reveal(v){
   const q=S.q,ok=v.ok,ci=v.correctIdx,tok=S.tok,live=()=>tok===S.tok&&!S.over,nm=pname(),L=hl();
   const cb=answerBtn(ci);if(cb){cb.classList.remove('sel');cb.classList.add('right')}
+  lastQ={q:q.q,opts:q.opts.map(x=>x.t),id:q.id||'',ranked:!!S.remote};
   const last=S.i===S.N-1;
   stats.answered++;
   if(ok){
@@ -1545,6 +1582,7 @@ async function finish(kind,extra){
   if(rank&&!S.remote){rk.textContent='🏆 #'+rank+' in your Hall of Fame';rk.classList.remove('hidden')}else rk.classList.add('hidden');
   $('endBadges').innerHTML=S.newBadges.map(id=>{const b=BADGES.find(x=>x.id===id);return'<span>'+b.em+' '+b.name+'</span>'}).join('');
   const nt=$('endNotice');nt.classList.add('hidden');
+  $('flagQBtn').classList.toggle('hidden',!lastQ);
   lastShare=buildShare(kind,prize,reached,0);
   showScreen('end');
   if(kind==='win')confetti(360);else if(kind==='walk'&&prize)confetti(80);
@@ -1694,19 +1732,57 @@ function openSettings(){
   });
   $('mOk').onclick=closeModalRaw;
 }
-function openReport(){
-  const mail='mailto:naijamillionaireng@gmail.com?subject='+encodeURIComponent('Question report — '+GAME_NAME);
-  openModal(`<h2>Report a question</h2><p>Spotted a wrong answer or a typo? Tell us the question and what’s wrong — we check every report.</p>
-    <div class="field"><textarea id="rTxt" rows="4" maxlength="500" placeholder="Paste the question and what is wrong…"></textarea></div>
-    <div class="actions2"><button class="btn ghost small" id="mNo">Cancel</button><button class="btn small" id="mYes">Send</button></div>`);
+/* ---------- legal pages ---------- */
+const LEGAL_DATE='22 Sep 2026';
+function legalHtml(kind){
+  const P=CONFIG.CONTACT_EMAIL;
+  if(kind==='privacy')return '<h2>Privacy notice</h2><p class="muted" style="font-size:.8rem">Last updated '+LEGAL_DATE+'</p>'+
+  '<div class="legal"><h3>What stays on your phone</h3><p>Your name, settings, scores, badges and streaks are saved in your browser on this device only. Clearing your browser data removes them.</p>'+
+  '<h3>What we collect for the Weekly Cash challenge</h3><ul><li><b>Leaderboard name</b> — public, so pick a name you are happy to show.</li><li><b>A random device code</b> and a <b>scrambled (hashed) form of your network address</b> — used only to enforce one ranked run per person and spot cheating. We cannot read your network address back from it.</li><li><b>Your run</b> — which options you picked, how long each took, your score.</li></ul>'+
+  '<h3>If you win and claim</h3><p>We collect your full name, phone number and, if you choose bank transfer, your bank name and account number. Only the owner can see these, and they are used only to pay you.</p>'+
+  '<h3>How long we keep it</h3><ul><li>Ranked run records: about 60 days.</li><li>Leaderboard entries and claim details: about 120 days, then deleted automatically.</li><li>The winner’s public name and score (no contact details) may be kept longer as the “past winners” list.</li></ul>'+
+  '<h3>Who else handles data</h3><p>We do not sell your data and show no ads. The game is hosted on GitHub Pages and its server runs on Cloudflare; a Cloudflare bot check runs before a ranked run; typefaces load from Google Fonts. These services see technical data such as your network address, under their own policies.</p>'+
+  '<h3>Your choices</h3><p>You can ask to see or delete your weekly-challenge data at any time by emailing <b>'+esc(P)+'</b>. We aim to handle personal data in line with the Nigeria Data Protection Act. If you are under 18, please ask a parent or guardian before entering the weekly challenge.</p></div>';
+  return '<h2>Weekly Cash — contest rules</h2><p class="muted" style="font-size:.8rem">Last updated '+LEGAL_DATE+'</p>'+
+  '<div class="legal"><ol>'+
+  '<li><b>Organiser.</b> The Weekly Cash challenge is run by the owner of Naija Millionaire (“we”). Contact: '+esc(P)+'.</li>'+
+  '<li><b>Free to enter.</b> No purchase or payment of any kind is needed to enter or to win.</li>'+
+  '<li><b>Who can enter.</b> You must be 18 or over (or have a parent’s or guardian’s permission). Prizes are paid in Nigerian naira to a Nigerian phone number (airtime or data) or bank account.</li>'+
+  '<li><b>How it works.</b> Each week runs from Monday 00:00 to Sunday 23:59, Lagos time. Each person gets <b>one ranked run per week</b> with the same 15 questions. Answers and timing are checked on our server. The highest money reached wins; ties are broken by more correct answers, then the fastest total answer time.</li>'+
+  '<li><b>Prize.</b> The top-ranked eligible player wins the weekly prize shown in the game (currently ₦'+wkAmount().toLocaleString('en-US')+'). To receive it, claim within '+((W.data&&W.data.payoutDays)||14)+' days after the week ends using the claim form. We pay by airtime/data or bank transfer, normally within a few days of a valid claim. Prizes are not transferable and there is no other cash alternative. If a prize is not claimed in time, we may award it to the next eligible player or carry it over.</li>'+
+  '<li><b>Fair play.</b> One person, one entry. No bots, scripts, extra devices or accounts, or sharing answers during the week. We may review any run, remove entries, disqualify players and award the prize to the next player. Our decision is final.</li>'+
+  '<li><b>Questions.</b> We check questions carefully, but mistakes can happen. If a ranked question is found to be wrong or unclear, we may correct or void it and re-rank the week.</li>'+
+  '<li><b>Service.</b> The game is provided “as is”. We may change, pause or end the challenge or the prize at any time. Timing is measured on the server, so we cannot be responsible for slow or lost internet connections.</li>'+
+  '<li><b>Your data.</b> See the privacy notice. We use your details only to run the challenge and pay winners.</li>'+
+  '<li><b>Changes.</b> We may update these rules; the version shown in the game is the one that applies.</li>'+
+  '</ol></div>';
+}
+function openLegal(kind){
+  openModal(legalHtml(kind)+'<div class="actions2"><button class="btn small" id="mOk">Close</button></div>');
+  $('mOk').onclick=()=>{closeModalRaw();if(/^#(terms|privacy)$/.test(location.hash)){try{history.replaceState(null,'',location.pathname+location.search+'#'+($('app').dataset.view==='home'?'':$('app').dataset.view))}catch(e){}}};
+}
+
+/* ---------- report / suggest a question ---------- */
+let lastQ=null;      // the most recent question shown (for the "Report last question" button)
+function openReport(ctx){
+  const ctxTxt=ctx?('Q: '+ctx.q+' | Options: '+ctx.opts.join(' / ')+(ctx.id?' | id '+ctx.id:'')+(ctx.ranked?' | RANKED':'')):'';
+  openModal('<h2>Report or suggest a question</h2><p>Spotted a wrong answer, a typo, or have a great question idea? Tell us — we read every message.</p>'+
+    '<div class="field"><span class="lbl">What is this about?</span><div class="row" id="rType">'+[['Wrong answer','Wrong answer'],['Typo or unclear','Typo / unclear'],['Suggest a question','Suggest a question'],['Something else','Something else']].map(([v,l],i)=>'<button class="chip" data-v="'+v+'" aria-pressed="'+(ctx?i===0:i===2)+'">'+l+'</button>').join('')+'</div></div>'+
+    (ctx?'<div class="notice" style="margin:0 0 14px"><b>Question:</b> '+esc(ctx.q)+'</div>':'')+
+    '<div class="field"><textarea id="rTxt" rows="4" maxlength="600" placeholder="'+(ctx?'What is wrong with it? What should the answer be?':'Your message… (for a new question, include the 4 options and mark the right one)')+'"></textarea></div>'+
+    '<div class="actions2"><button class="btn ghost small" id="mNo">Cancel</button><button class="btn small" id="mYes">Send</button></div>');
+  let type=ctx?'Wrong answer':'Suggest a question';
+  $$('#rType .chip').forEach(ch=>ch.onclick=()=>{$$('#rType .chip').forEach(x=>x.setAttribute('aria-pressed','false'));ch.setAttribute('aria-pressed','true');type=ch.dataset.v});
   $('mNo').onclick=closeModalRaw;
   $('mYes').onclick=async()=>{
-    const txt=$('rTxt').value.trim();if(txt.length<8){toast('Please add a few more details');return}
+    const txt=$('rTxt').value.trim();if(txt.length<6){toast('Please add a few more details');return}
+    const full=(ctxTxt?ctxTxt+'\n\n':'')+txt;
     const f=CONFIG.FORMS.report;
     if(f.url&&f.fields.text){
-      try{const b=new URLSearchParams();b.append(f.fields.text,txt);if(f.fields.page)b.append(f.fields.page,location.href);await fetch(f.url,{method:'POST',mode:'no-cors',body:b});closeModalRaw();toast('Thanks — report sent!');return}catch(e){}
+      try{const bd=new URLSearchParams();bd.append(f.fields.text,full);if(f.fields.type)bd.append(f.fields.type,type);if(f.fields.page)bd.append(f.fields.page,location.href);
+        await fetch(f.url,{method:'POST',mode:'no-cors',body:bd});closeModalRaw();toast('Thanks — sent! 🙏');return}catch(e){}
     }
-    window.location.href=mail+'&body='+encodeURIComponent(txt);closeModalRaw();
+    window.location.href='mailto:'+CONFIG.CONTACT_EMAIL+'?subject='+encodeURIComponent(type+' — '+GAME_NAME)+'&body='+encodeURIComponent(full);closeModalRaw();
   };
 }
 
@@ -1773,8 +1849,9 @@ function renderWeekly(){
       const v=$('wkName').value.trim();
       if(!validName(v)){toast('Use 2–12 letters or numbers for your name');return}
       profile.name=v;saveProfile();applyProfile();refreshProfileInputs();
-      openModal('<h2>Ready?</h2><p>This is your <b>one ranked run</b> for the week. Each question is timed on the server, and you can’t redo it. Good luck, '+esc(v)+'!</p><div class="actions2"><button class="btn ghost small" id="mNo">Not yet</button><button class="btn" id="mYes">Start ranked run</button></div>');
+      openModal('<h2>Ready?</h2><p>This is your <b>one ranked run</b> for the week. Each question is timed on the server, and you can’t redo it. Good luck, '+esc(v)+'!</p><p style="font-size:.8rem">By starting you agree to the <a href="#terms" data-legal="terms" style="text-decoration:underline">contest rules</a> and <a href="#privacy" data-legal="privacy" style="text-decoration:underline">privacy notice</a>.</p><div class="actions2"><button class="btn ghost small" id="mNo">Not yet</button><button class="btn" id="mYes">Start ranked run</button></div>');
       $('mNo').onclick=closeModalRaw;$('mYes').onclick=()=>{closeModalRaw();startWeekly()};
+      $('#modal [data-legal]').forEach(l=>l.onclick=e=>{e.preventDefault();openLegal(l.dataset.legal)});
     };
   }
   // ----- last week's winner / claim -----
@@ -1793,7 +1870,7 @@ function renderWeekly(){
   pastEl.innerHTML=(W.past&&W.past.length)?W.past.map(p=>'<li><span class="rk">🏆</span><span class="nm">'+esc(p.winner.name)+'</span><span class="pz">'+fmt(p.winner.prize)+'</span><span class="tm">'+weekLabel(p.week)+'</span></li>').join(''):'<li class="empty">Past winners will appear here.</li>';
 }
 function openClaim(weekId,runId){
-  openModal(`<h2>Claim your prize 🏆</h2><p>Congratulations! Tell us how to pay you. We’ll verify your win first, then send ₦${wkAmount().toLocaleString('en-US')} within a few days. Your details are only used to pay you.</p>
+  openModal(`<h2>Claim your prize 🏆</h2><p>Congratulations! Tell us how to pay you. We’ll verify your win first, then send ₦${wkAmount().toLocaleString('en-US')} within a few days. Your details are only used to pay you (see the <a href="#privacy" data-legal="privacy" style="text-decoration:underline">privacy notice</a>).</p>
     <div class="field"><span class="lbl">Full name</span><input type="text" id="cName" maxlength="60" autocomplete="name"></div>
     <div class="field"><span class="lbl">Phone number</span><input type="tel" id="cPhone" maxlength="20" placeholder="0803 000 0000" autocomplete="tel"></div>
     <div class="field"><span class="lbl">Get paid by</span><div class="row" id="cMethod"><button class="chip" data-v="airtime" aria-pressed="true">Airtime / data</button><button class="chip" data-v="bank" aria-pressed="false">Bank transfer</button></div></div>
@@ -1802,6 +1879,7 @@ function openClaim(weekId,runId){
     <p id="cErr" style="color:var(--bad);font-size:.85rem;margin:0 0 8px"></p>
     <div class="actions2"><button class="btn ghost small" id="mNo">Cancel</button><button class="btn" id="mYes">Submit claim</button></div>`);
   let method='airtime',net='MTN';
+  $('#modal [data-legal]').forEach(l=>l.onclick=e=>{e.preventDefault();openLegal(l.dataset.legal)});
   const grp=(id,fn)=>{const g=$(id);$$('.chip',g).forEach(c=>c.onclick=()=>{$$('.chip',g).forEach(x=>x.setAttribute('aria-pressed','false'));c.setAttribute('aria-pressed','true');fn(c.dataset.v)})};
   grp('cMethod',v=>{method=v;$('cAir').classList.toggle('hidden',v!=='airtime');$('cBank').classList.toggle('hidden',v!=='bank')});
   grp('cNet',v=>net=v);
@@ -1849,6 +1927,8 @@ function wire(){
   $$('[data-go]').forEach(b=>b.onclick=()=>{sfx.click();goView(b.dataset.go)});
   $('gearBtn').onclick=openSettings;$('railSettings').onclick=openSettings;$('howBtn').onclick=openHow;
   $('reportLink').onclick=e=>{e.preventDefault();openReport()};
+  $('[data-legal]').forEach(l=>l.onclick=e=>{e.preventDefault();openLegal(l.dataset.legal)});
+  $('flagQBtn').onclick=()=>{if(lastQ)openReport(lastQ)};
   $('heroPlay').onclick=()=>{sfx.click();openModeSheet('classic')};
   $('heroWeekly').onclick=()=>{sfx.click();goView('weekly')};
   $('potCard').onclick=()=>{sfx.click();goView('weekly')};
@@ -1899,6 +1979,7 @@ function boot(){
   ST.pose('host','idle');ST.pose('con','idle');
   ST.show('host',hl().welcomeHome(pname()));ST.talk('host',true);setTimeout(()=>ST.talk('host',false),2600);
   if(apiBase())loadWeekly(false);
+  if(/^#(terms|privacy)$/.test(location.hash))openLegal(location.hash.slice(1));
   setInterval(()=>{if($('app').dataset.view==='weekly'&&!$('app').classList.contains('hidden'))renderCountdown()},30000);
   if(!settings.seenHow)setTimeout(()=>{if(!S&&$('overlay').classList.contains('hidden'))openHow()},900);
 }
