@@ -1,0 +1,18 @@
+{
+  "name": "Naija Millionaire",
+  "short_name": "Millionaire",
+  "description": "A Nigerian quiz game show — 15 questions to ₦10,000,000 and a real weekly cash prize.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#12082b",
+  "theme_color": "#12082b",
+  "lang": "en-NG",
+  "categories": ["games", "trivia", "entertainment"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
