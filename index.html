@@ -394,6 +394,16 @@ footer.foot a{color:var(--mute);text-decoration:underline}
 html[data-motion="reduce"] *{animation:none!important;transition:none!important}
 @media(prefers-reduced-motion:reduce){*{animation:none!important}}
 
+/* ---------- Lite visual mode (older / budget phones): fewer effects, same game ---------- */
+html[data-perf="lite"] *{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+html[data-perf="lite"] body{background-attachment:scroll}
+html[data-perf="lite"] .beam{display:none}
+html[data-perf="lite"] .bulbs i,html[data-perf="lite"] .ring,html[data-perf="lite"] .p .eyes,html[data-perf="lite"] .timer.warn i{animation:none}
+html[data-perf="lite"] .p .bob{animation:none}
+html[data-perf="lite"] .overlay{background:rgba(5,2,18,.9)}
+html[data-perf="lite"] .card{background:color-mix(in srgb,var(--bg2) 82%,transparent)}
+html[data-perf="lite"] .view{animation:none!important}
+
 /* ---------- legal text ---------- */
 .legal{font-size:.9rem;color:var(--mute);line-height:1.55;margin-bottom:12px}
 .legal h3{font-size:.95rem;color:var(--ink);margin:14px 0 4px}
@@ -796,7 +806,7 @@ const dateLabel=(k=dateKey())=>String(k%100).padStart(2,'0')+' '+MONTHS[Math.flo
 
 /* ---------- settings / profile / stats ---------- */
 const oldSettings=store.get('nm_settings',{});
-let settings=Object.assign({theme:'royal',text:'normal',motion:'auto',timerMode:oldSettings.timer===false?'off':'normal',sound:true,voice:true,hostStyle:'proper',seenHow:false},oldSettings);
+let settings=Object.assign({theme:'royal',text:'normal',motion:'auto',timerMode:oldSettings.timer===false?'off':'normal',sound:true,voice:true,hostStyle:'proper',seenHow:false,speed:'quick',perf:'auto'},oldSettings);
 let profile=Object.assign({name:'',look:'sis',topic:'mixed',difficulty:'normal'},store.get('nm_profile',{}));
 const defStats=()=>({games:0,mills:0,best:0,correct:0,answered:0,naijaCorrect:0,dStreak:0,dBest:0,dLast:0,badges:{}});
 let stats=Object.assign(defStats(),store.get('nm_stats',{}));
@@ -807,6 +817,8 @@ function applyTheme(){
   const h=document.documentElement;
   h.dataset.theme=settings.theme;h.dataset.text=settings.text;
   h.dataset.motion=settings.motion==='reduce'?'reduce':'auto';
+  const lowEnd=(navigator.deviceMemory&&navigator.deviceMemory<=4)||(navigator.hardwareConcurrency&&navigator.hardwareConcurrency<=4);
+  h.dataset.perf=(settings.perf==='lite'||(settings.perf==='auto'&&lowEnd))?'lite':'full';   // Lite = no blur / spotlights / idle animations (older phones)
   const c={royal:'#12082b',midnight:'#07080d',sunset:'#0a1a33',day:'#f5f0ff'}[settings.theme]||'#12082b';
   const m=document.querySelector('meta[name="theme-color"]');if(m)m.content=c;
 }
@@ -1008,6 +1020,7 @@ const MODES={
   weekly:{label:'Ranked',n:15,prizes:PRIZES,safe:[4,9],plan:()=>PLANS.normal}
 };
 let S=null,tick=null;
+const showMode=()=>settings.speed==='show'&&!(S&&S.remote);   // the slow TV-style pauses never apply to ranked runs
 const tierAt=i=>S.plan[i];
 const prizeAt=i=>S.prizes?S.prizes[i]:0;
 const prizeTxt=i=>S.prizes?fmt(S.prizes[i]):'•';
@@ -1238,16 +1251,20 @@ function loadQuestion(kind){
 
 async function runIntro(tok,kind){
   const q=S.q,n=S.i+1,live=()=>tok===S.tok&&!S.over,nm=pname(),L=hl(),pz=fmt(prizeAt(S.i));
-  if(S.remote){
-    await say(G,'host',L.ranked(n,pz),900);if(!live())return;
-    finishIntro();return;
-  }
+  const quick=settings.speed!=='show'||!!S.remote;        // ranked runs are always quick: the server clock is already running
   let opener;
-  if(kind==='swap')opener=L.swap;
+  if(S.remote)opener=L.ranked(n,pz);
+  else if(kind==='swap')opener=L.swap;
   else if(S.mode==='practice')opener=L.practice(n);
   else if(S.i===0)opener=L.welcomeFirst(nm,S.daily,pz);
   else if(S.i===S.N-1)opener=L.last(nm);
   else opener=L.q(n,pz);
+  if(quick){                                                // show every answer at once; the host talks in the background
+    $$('.ans.pending').forEach(b=>b.classList.remove('pending'));
+    finishIntro();
+    line(G,'host',opener,S.remote?opener:opener+' '+q.q,1200);
+    return;
+  }
   await say(G,'host',opener,700);if(!live())return;
   await line(G,'host',L.listen,q.q,350);if(!live())return;
   const btns=$$('.ans');
@@ -1272,7 +1289,7 @@ function skipIntro(){if(S.ready||S.over)return;S.tok++;cancelSpeech();finishIntr
 function select(idx){
   if(!S.ready||S.locked||S.over)return;
   if(answerBtn(idx).classList.contains('gone'))return;
-  S.sel=idx;sfx.click();
+  S.sel=idx;sfx.click();cancelSpeech();
   $$('.ans').forEach(b=>b.classList.toggle('sel',+b.dataset.i===idx));
   G.show('con',rand(hl().picks(LETTERS[idx])));
   const a=$('actions');a.innerHTML='';
@@ -1317,10 +1334,15 @@ async function lockIn(){
   G.pose('con','nervous');
   const sel=S.sel,lt=LETTERS[sel];
   const verdict=S.remote?judgeSafe(sel,false):null;        // ranked: ask the server NOW so the theatre doesn't cost time
-  await say(G,'host',L.askFinal,1500);if(!live())return;
-  await line(G,'con',L.conFinal(lt),L.conFinal(lt),1100);if(!live())return;
-  G.show('host',L.letsSee);sfx.lock();
-  await wait(1400);if(!live())return;
+  if(showMode()){                            // the full TV suspense
+    await say(G,'host',L.askFinal,1500);if(!live())return;
+    await line(G,'con',L.conFinal(lt),L.conFinal(lt),1100);if(!live())return;
+    G.show('host',L.letsSee);sfx.lock();
+    await wait(1400);if(!live())return;
+  }else{                                                   // quick: a short beat, no speech
+    G.show('con',L.conFinal(lt));sfx.lock();
+    await wait(900);if(!live())return;
+  }
   const v=verdict?await verdict:await judge(sel,false);
   if(!live())return;
   if(v.resynced){toast('Reconnected — please answer again.');S.tok++;return loadQuestion('remote')}
@@ -1365,7 +1387,9 @@ async function reveal(v){
     if(S.sel!=null&&answerBtn(S.sel)){answerBtn(S.sel).classList.remove('sel');answerBtn(S.sel).classList.add('wrong')}
     sfx.wrong();G.pose('con','sad');G.pose('host','sad');
     $('msg').textContent='The right answer was '+LETTERS[ci]+'.';
-    await say(G,'host',v.timedOut?L.timeUp:L.wrong(nm),2200);if(!live())return;
+    if(showMode())await say(G,'host',v.timedOut?L.timeUp:L.wrong(nm),2200);
+    else{line(G,'host',v.timedOut?L.timeUp:L.wrong(nm),v.timedOut?L.timeUp:L.wrong(nm),1200);await wait(1300)}   // don't wait for the whole sentence
+    if(!live())return;
     if(S.mode==='practice'){
       G.pose('host','idle');G.pose('con','think');
       $('actions').appendChild(mk(last?'See my score':'Next Question →','btn',()=>{
@@ -1374,8 +1398,10 @@ async function reveal(v){
       }));
       return;
     }
-    await line(G,'con',L.conWrong,L.conWrong,1200);if(!live())return;
-    await wait(500);if(!live())return;
+    if(showMode()){
+      await line(G,'con',L.conWrong,L.conWrong,1200);if(!live())return;
+      await wait(500);if(!live())return;
+    }else{line(G,'con',L.conWrong,null,900);await wait(900);if(!live())return}
     finish('lose',v);
   }
 }
@@ -1414,9 +1440,10 @@ async function timeUp(){
   stats.answered++;saveStats();S.log.push('r');
   sfx.wrong();G.pose('con','sad');G.pose('host','sad');
   $('msg').textContent='The right answer was '+LETTERS[v.correctIdx]+'.';
-  await say(G,'host',L.timeUp,2200);if(!live())return;
+  if(showMode()){await say(G,'host',L.timeUp,2200);if(!live())return;await wait(600)}
+  else{line(G,'host',L.timeUp,L.timeUp,1200);await wait(1300)}
+  if(!live())return;
   if(S.mode==='practice')return;   // practice has no timer
-  await wait(600);if(!live())return;
   finish('lose',{...v,timedOut:true});
 }
 
@@ -1689,6 +1716,7 @@ function renderHome(){
 }
 function mostSettingsChips(){
   return `<div class="field"><span class="lbl">Timer</span><div class="row" id="shTimer">${[['off','Off'],['relaxed','Relaxed'],['normal','Normal'],['strict','Strict']].map(([k,l])=>`<button class="chip" data-v="${k}" aria-pressed="${settings.timerMode===k}">${l}</button>`).join('')}</div></div>
+  <div class="field"><span class="lbl">Game speed</span><div class="row" id="shSpeed">${[['quick','Quick'],['show','Full TV show']].map(([k,l])=>`<button class="chip" data-v="${k}" aria-pressed="${settings.speed===k}">${l}</button>`).join('')}</div></div>
   <div class="field"><span class="lbl">Host style</span><div class="row" id="shStyle">${[['proper','Proper English'],['pidgin','Naija Pidgin']].map(([k,l])=>`<button class="chip" data-v="${k}" aria-pressed="${settings.hostStyle===k}">${l}</button>`).join('')}</div></div>`;
 }
 function openModeSheet(mode){
@@ -1704,6 +1732,7 @@ function openModeSheet(mode){
   wire('shDiff',v=>{profile.difficulty=v;saveProfile()});
   wire('shTimer',v=>{settings.timerMode=v;saveSettings()});
   wire('shStyle',v=>{settings.hostStyle=v;saveSettings()});
+  wire('shSpeed',v=>{settings.speed=v;saveSettings()});
   $('mNo').onclick=closeModalRaw;$('mYes').onclick=()=>{closeModalRaw();sfx.click();startGame(mode)};
 }
 function openHow(){
@@ -1723,7 +1752,8 @@ function openSettings(){
   openModal(`<h2>Options</h2>
     <div class="field"><span class="lbl">Colour theme</span><div class="swatches" id="oTheme">${sw.map(([k,g,l])=>`<button class="sw" data-v="${k}" aria-pressed="${settings.theme===k}" aria-label="${l}"><i style="background:${g}"></i><span>${l}</span></button>`).join('')}</div></div>
     <div class="field"><span class="lbl">Text size</span><div class="row" id="oText">${[['normal','Normal'],['large','Large']].map(([k,l])=>`<button class="chip" data-v="${k}" aria-pressed="${settings.text===k}">${l}</button>`).join('')}</div></div>
-    ${mostSettingsChips().replace('id="shTimer"','id="oTimer"').replace('id="shStyle"','id="oStyle"')}
+    ${mostSettingsChips().replace('id="shTimer"','id="oTimer"').replace('id="shStyle"','id="oStyle"').replace('id="shSpeed"','id="oSpeed"')}
+    <div class="field"><span class="lbl">Visual effects</span><div class="row" id="oPerf">${[['auto','Auto'],['full','Full'],['lite','Lite (faster on old phones)']].map(([k,l])=>`<button class="chip" data-v="${k}" aria-pressed="${settings.perf===k}">${l}</button>`).join('')}</div></div>
     <div class="field"><span class="lbl">Sound & voice</span><div class="row" id="oSound">
       <button class="chip" data-k="sound" aria-pressed="${settings.sound}">Sound effects</button>
       <button class="chip ${canSpeak?'':'off'}" data-k="voice" aria-pressed="${settings.voice&&canSpeak}">Host voice${canSpeak?'':' (n/a)'}</button>
@@ -1735,6 +1765,8 @@ function openSettings(){
   wire('oText',v=>{settings.text=v;saveSettings();applyTheme()});
   wire('oTimer',v=>{settings.timerMode=v;saveSettings()});
   wire('oStyle',v=>{settings.hostStyle=v;saveSettings()});
+  wire('oSpeed',v=>{settings.speed=v;saveSettings()});
+  wire('oPerf',v=>{settings.perf=v;saveSettings();applyTheme()});
   $$('#oSound [data-k]').forEach(c=>c.onclick=()=>{
     const k=c.dataset.k;
     if(k==='motion')settings.motion=settings.motion==='reduce'?'auto':'reduce';
