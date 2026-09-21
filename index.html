@@ -1589,7 +1589,8 @@ function goView(v,refresh){
   if(!VIEWS.includes(v))v='home';
   $('app').dataset.view=v;
   $$('[data-go]').forEach(b=>{if(b.classList.contains('nav-btn')||b.classList.contains('brand'))b.setAttribute('aria-current',b.dataset.go===v?'page':'false')});
-  if(location.hash!=='#'+v){try{history.replaceState(null,'','#'+v)}catch(e){}}
+  const want=v==='home'?'':'#'+v;                      // keep the front page URL clean (no #home)
+  if(location.hash!==want){try{history.replaceState(null,'',location.pathname+location.search+want)}catch(e){}}
   window.scrollTo(0,0);
   if(v==='home')renderHome();
   if(v==='weekly')loadWeekly(!!refresh);
