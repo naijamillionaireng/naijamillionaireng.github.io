@@ -536,7 +536,7 @@ html[data-perf="lite"] .view{animation:none!important}
             </div>
           </div>
         </div>
-        <footer class="foot"><span>New questions every week. Play responsibly — it's only naira on paper. Weekly cash prizes are free to enter.</span><span><a href="#" class="installTrigger" id="installLink">Get the app</a> · <a href="#terms" data-legal="terms">Contest rules</a> · <a href="#privacy" data-legal="privacy">Privacy</a> · <a href="#" id="reportLink">Report or suggest a question</a></span></footer>
+        <footer class="foot"><span>New questions every week. Play responsibly — it's only naira on paper. Weekly cash prizes are free to enter.</span><span><a href="#" class="installTrigger" id="installLink">Get the app</a> · <a href="#" id="inviteLink">Invite friends on WhatsApp</a> · <a href="#terms" data-legal="terms">Contest rules</a> · <a href="#privacy" data-legal="privacy">Privacy</a> · <a href="#" id="reportLink">Report or suggest a question</a></span></footer>
       </section>
 
       <!-- ============ WEEKLY ============ -->
@@ -1578,7 +1578,7 @@ function squares(){
 }
 let lastShare='';
 function buildShare(kind,prize,reached,rank){
-  const url=CONFIG.SITE_URL?'\nCan you beat me? '+CONFIG.SITE_URL:(/^https?:/.test(location.protocol)?'\nCan you beat me? '+location.origin+location.pathname:'');
+  const url=CONFIG.SITE_URL?'\nCan you beat me? '+CONFIG.SITE_URL+'?utm_source=share':(/^https?:/.test(location.protocol)?'\nCan you beat me? '+location.origin+location.pathname:'');
   const head='🇳🇬 '+GAME_NAME+' · '+S.M.label+(S.daily?' '+dateLabel():'');
   let verb;
   if(S.mode==='practice')verb='I scored '+S.score+'/'+S.N+' in practice 🧠';
@@ -1682,12 +1682,13 @@ async function shareCopy(){
 let lastCard=null;   // what the finished game looked like (drives the picture + challenge link)
 
 /* ---------- anonymous visit counter: no name, no id; at most one ping per kind per device per day ---------- */
+const UTM_SRC=(new URLSearchParams(location.search).get('utm_source')||'').toLowerCase().replace(/[^a-z0-9_-]/g,'').slice(0,20);   // where the visitor came from, e.g. whatsapp
 function ping(kind){
   if(!apiBase())return;
   const k='nm_ping_'+kind,today=String(dateKey());
   if(kind!=='install'&&store.get(k,'')===today)return;
   store.set(k,today);
-  try{fetch(apiBase()+'/hit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({e:kind,app:isStandalone()}),keepalive:true}).catch(()=>{})}catch(e){}
+  try{fetch(apiBase()+'/hit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({e:kind,app:isStandalone(),src:kind==='visit'?UTM_SRC:''}),keepalive:true}).catch(()=>{})}catch(e){}
 }
 
 /* ---------- share picture (drawn on a canvas, 1080x1920 = WhatsApp Status shape) ---------- */
@@ -1740,7 +1741,7 @@ function challengeLink(){
   const d=lastCard;if(!d||!d.ids)return '';
   const code=d.ids.map(x=>x.tier[0]+b36(x.id)).join('');
   const base=(CONFIG.SITE_URL||(location.origin+location.pathname)).replace(/#.*$/,'');
-  return base+'#ch='+code+'.'+d.prize+'.'+d.correct+'.'+encodeURIComponent(d.name);
+  return base+'?utm_source=challenge#ch='+code+'.'+d.prize+'.'+d.correct+'.'+encodeURIComponent(d.name);
 }
 function parseChallenge(h){
   const m=/^#ch=((?:[emh][0-9a-z]{2}){15})\.(\d{1,9})\.(\d{1,2})\.(.{1,60})$/i.exec(h||'');
@@ -1784,6 +1785,13 @@ function renderSponsor(){
   el.innerHTML=esc(s.text||'Prize sponsored by')+' '+(safe?'<a href="'+esc(s.url)+'" target="_blank" rel="sponsored noopener">'+esc(s.name)+'</a>':'<b>'+esc(s.name)+'</b>');
   el.classList.remove('hidden');
 }
+
+/* ---------- "Invite friends on WhatsApp" (tagged link so the owner can see how many visits it brings) ---------- */
+function inviteText(){
+  const base=(CONFIG.SITE_URL||(location.origin+location.pathname)).replace(/[?#].*$/,'');
+  return '🇳🇬 *'+GAME_NAME+'* is the Nigerian quiz game show! Play free on your phone, climb the money ladder, and every week one player wins *₦'+(CONFIG.PRIZE_FALLBACK||3000).toLocaleString('en-US')+' cash*. Think you can beat me? 👇\n'+base+'?utm_source=invite';
+}
+function inviteFriends(){ping('share');window.open('https://wa.me/?text='+encodeURIComponent(inviteText()),'_blank','noopener')}
 
 
 /* =====================================================================
@@ -2137,6 +2145,7 @@ function startTaglines(){const t=['Nigeria’s quiz show','Think fast. Win big.'
 function wire(){
   $$('[data-go]').forEach(b=>b.onclick=()=>{sfx.click();goView(b.dataset.go)});
   $('gearBtn').onclick=openSettings;$('railSettings').onclick=openSettings;$('howBtn').onclick=openHow;
+  $('inviteLink').onclick=e=>{e.preventDefault();sfx.click();inviteFriends()};
   $('reportLink').onclick=e=>{e.preventDefault();openReport()};
   $$('[data-legal]').forEach(l=>l.onclick=e=>{e.preventDefault();openLegal(l.dataset.legal)});
   $('flagQBtn').onclick=()=>{if(lastQ)openReport(lastQ)};
