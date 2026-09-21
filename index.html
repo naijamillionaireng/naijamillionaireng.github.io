@@ -404,6 +404,13 @@ html[data-perf="lite"] .overlay{background:rgba(5,2,18,.9)}
 html[data-perf="lite"] .card{background:color-mix(in srgb,var(--bg2) 82%,transparent)}
 html[data-perf="lite"] .view{animation:none!important}
 
+/* ---------- install-the-app sheet ---------- */
+.how{border:1px solid var(--line,rgba(255,255,255,.14));border-radius:12px;padding:8px 12px;margin-bottom:8px}
+.how.mine{border-color:var(--gold,#ffc53d);background:color-mix(in srgb,var(--gold,#ffc53d) 10%,transparent)}
+.how h3{font-size:.95rem;margin:2px 0 4px}.how h3 em{font-style:normal;font-size:.75rem;color:var(--gold,#ffc53d)}
+.how .rules{margin:0 0 4px}
+.warnbox{font-size:.85rem;border-radius:10px;padding:8px 10px;margin-bottom:10px;background:rgba(255,157,74,.15);border:1px solid rgba(255,157,74,.5)}
+
 /* ---------- legal text ---------- */
 .legal{font-size:.9rem;color:var(--mute);line-height:1.55;margin-bottom:12px}
 .legal h3{font-size:.95rem;color:var(--ink);margin:14px 0 4px}
@@ -465,7 +472,7 @@ html[data-perf="lite"] .view{animation:none!important}
       <div class="topline">
         <div class="ttl"><span data-gname>Naija Millionaire</span><small id="tagline">Nigeria's quiz show</small></div>
         <div class="row">
-          <button class="btn small hidden" id="installBtn">⬇ Install app</button>
+          <button class="btn small installTrigger" id="installBtn">⬇ Get the app</button>
           <button class="btn ghost small" id="howBtn">How to play</button>
           <button class="gear" id="gearBtn" aria-label="Options">⚙️</button>
         </div>
@@ -526,7 +533,7 @@ html[data-perf="lite"] .view{animation:none!important}
             </div>
           </div>
         </div>
-        <footer class="foot"><span>New questions every week. Play responsibly — it's only naira on paper. Weekly cash prizes are free to enter.</span><span><a href="#terms" data-legal="terms">Contest rules</a> · <a href="#privacy" data-legal="privacy">Privacy</a> · <a href="#" id="reportLink">Report or suggest a question</a></span></footer>
+        <footer class="foot"><span>New questions every week. Play responsibly — it's only naira on paper. Weekly cash prizes are free to enter.</span><span><a href="#" class="installTrigger" id="installLink">Get the app</a> · <a href="#terms" data-legal="terms">Contest rules</a> · <a href="#privacy" data-legal="privacy">Privacy</a> · <a href="#" id="reportLink">Report or suggest a question</a></span></footer>
       </section>
 
       <!-- ============ WEEKLY ============ -->
@@ -1965,17 +1972,30 @@ let installEvt=null;
 const isStandalone=()=>(window.matchMedia&&matchMedia('(display-mode: standalone)').matches)||navigator.standalone===true;
 const isIOS=()=>/iphone|ipad|ipod/i.test(navigator.userAgent)&&!window.MSStream;
 function refreshInstallBtn(){
-  const b=$('installBtn');if(!b)return;
-  b.classList.toggle('hidden',isStandalone()||!(installEvt||isIOS()));
+  // the button is always available (until the game is installed) so people can see HOW to install on any phone
+  $$('.installTrigger').forEach(b=>b.classList.toggle('hidden',isStandalone()));
 }
 addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvt=e;refreshInstallBtn()});
-addEventListener('appinstalled',()=>{installEvt=null;refreshInstallBtn();toast('✅ Installed! Find it on your home screen.')});
-async function doInstall(){
-  if(installEvt){installEvt.prompt();try{await installEvt.userChoice}catch(e){}installEvt=null;refreshInstallBtn();return}
-  if(isIOS()){
-    openModal('<h2>Install on your iPhone</h2><ol class="rules" style="margin-bottom:14px"><li>Open this page in <b>Safari</b>.</li><li>Tap the <b>Share</b> button (the square with an arrow).</li><li>Choose <b>Add to Home Screen</b>, then <b>Add</b>.</li></ol><p style="font-size:.85rem">You will get a Naija Millionaire icon that opens the game full-screen, like an app.</p><div class="actions2"><button class="btn small" id="mOk">Got it</button></div>');
-    $('mOk').onclick=closeModalRaw;
-  }
+addEventListener('appinstalled',()=>{installEvt=null;refreshInstallBtn();closeModalRaw();toast('✅ Installed! Find it on your home screen.')});
+const isAndroid=()=>/android/i.test(navigator.userAgent);
+const inAppBrowser=()=>/FBAN|FBAV|Instagram|Line\/|MicroMessenger|; wv\)|TikTok|Twitter/i.test(navigator.userAgent);
+function doInstall(){
+  const me=isIOS()?'ios':isAndroid()?'android':'desktop';
+  const box=(k,title,steps)=>`<div class="how${me===k?' mine':''}"><h3>${title}${me===k?' <em>· your device</em>':''}</h3><ol class="rules">${steps.map(s=>'<li>'+s+'</li>').join('')}</ol></div>`;
+  openModal(`<h2>Get the app</h2>
+    <p style="font-size:.9rem;margin-bottom:10px">Play Naija Millionaire like a real app: full-screen, its own icon, opens fast. It's free and takes almost no space.</p>
+    ${inAppBrowser()?'<p class="warnbox">You opened this inside another app (WhatsApp, Facebook, Instagram…). Tap the <b>⋮</b> or <b>⋯</b> menu and choose <b>Open in Chrome</b> (or <b>Open in Safari</b>) first, then come back to this page.</p>':''}
+    ${installEvt?'<div class="actions2" style="margin-bottom:12px"><button class="btn" id="mInstallNow">⬇ Install now</button></div>':''}
+    ${[
+      box('android','Android (Chrome)',['Tap the <b>⋮</b> menu (top right).','Tap <b>Install app</b> or <b>Add to Home screen</b>.','Tap <b>Install</b>. The icon appears on your home screen.']),
+      box('ios','iPhone / iPad (Safari)',['Open this page in <b>Safari</b> (not Chrome).','Tap the <b>Share</b> button (square with an arrow).','Scroll down, tap <b>Add to Home Screen</b>, then <b>Add</b>.']),
+      box('desktop','Computer (Chrome or Edge)',['Look for the <b>install icon</b> at the right end of the address bar.','Click it, then click <b>Install</b>.'])
+    ].join('')}
+    <p style="font-size:.8rem;margin-top:10px;opacity:.8">No app store needed. You can also just keep playing here in your browser.</p>
+    <div class="actions2"><button class="btn small" id="mOk">Close</button></div>`);
+  $('mOk').onclick=closeModalRaw;
+  const n=$('mInstallNow');
+  if(n)n.onclick=async()=>{try{installEvt.prompt();await installEvt.userChoice}catch(e){}installEvt=null;refreshInstallBtn();closeModalRaw()};
 }
 
 /* ---------- audio / misc ---------- */
@@ -2036,7 +2056,7 @@ function boot(){
   ST=makeStage($('stStart'));G=makeStage($('stGame'));EN=makeStage($('stEnd'));allStages=[ST,G,EN];
   document.title=GAME_NAME;$$('[data-gname]').forEach(el=>el.textContent=GAME_NAME);
   buildHomeLadder();wire();syncMute();applyProfile();startTaglines();
-  $('installBtn').onclick=doInstall;refreshInstallBtn();
+  $$('.installTrigger').forEach(b=>b.onclick=e=>{e.preventDefault();sfx.click();doInstall()});refreshInstallBtn();
   if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost')){navigator.serviceWorker.register('sw.js').catch(()=>{})}
   const v=(location.hash||'#home').slice(1);
   showScreen('app');goView(VIEWS.includes(v)?v:'home');
